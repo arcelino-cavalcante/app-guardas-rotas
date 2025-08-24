@@ -1,0 +1,1221 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controle de Frota</title>
+    <!-- Tailwind CSS via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide-react@0.294.0/dist/lucide-react.js"></script>
+    <!-- PDF Generation Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        /* Estilo para garantir que o corpo ocupe toda a altura */
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* Classe para esconder elementos */
+        .hidden {
+            display: none;
+        }
+
+        /* Estilo para o corpo do app */
+        body {
+            background-color: #000;
+            color: #fff;
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Container principal da aplicação -->
+    <div id="app-root"></div>
+
+    <!-- Container para notificações (Toast) -->
+    <div id="toast-container" class="fixed bottom-24 md:bottom-5 right-5 z-50"></div>
+
+    <!-- Container para modais -->
+    <div id="modal-container"></div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        // Importações do Firebase
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.17.1/firebase-app.js";
+        import {
+            getFirestore, collection, onSnapshot, addDoc, doc,
+            updateDoc, deleteDoc, query, where, getDocs
+        } from "https://www.gstatic.com/firebasejs/9.17.1/firebase-firestore.js";
+
+        // --- Configuração do Firebase ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyCzhVIheC1L-Xr-0QwjJ77wRLA4ZhWJ-ro",
+            authDomain: "dados-guarda-jucati.firebaseapp.com",
+            projectId: "dados-guarda-jucati",
+            storageBucket: "dados-guarda-jucati.appspot.com",
+            messagingSenderId: "77413551227",
+            appId: "1:77413551227:web:d47d417f0e7cf6d293e6de"
+        };
+
+        // --- Inicialização do Firebase ---
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        // --- Estado Global da Aplicação ---
+        let state = {
+            user: null,
+            guards: [],
+            vehicles: [],
+            trips: [],
+            maintenances: [],
+            observations: [],
+            adminView: { page: 'dashboard', id: null },
+            guardView: 'trip',
+            listeners: {} // Para armazenar os unsubscribes do onSnapshot
+        };
+
+        // --- Elementos do DOM ---
+        const appRoot = document.getElementById('app-root');
+        const toastContainer = document.getElementById('toast-container');
+        const modalContainer = document.getElementById('modal-container');
+
+        // --- Sistema de Notificação (Toast) ---
+        function showToast(message, type = 'success') {
+            const toastId = `toast-${Date.now()}`;
+            const bgColor = type === 'success' ? 'bg-green-600' : 'bg-red-600';
+            const toastHTML = `
+                <div id="${toastId}" class="p-4 rounded-lg shadow-lg text-white ${bgColor} mb-2">
+                    ${message}
+                </div>
+            `;
+            toastContainer.insertAdjacentHTML('beforeend', toastHTML);
+            setTimeout(() => {
+                const toastElement = document.getElementById(toastId);
+                if (toastElement) {
+                    toastElement.remove();
+                }
+            }, 3000);
+        }
+
+        // --- Sistema de Modal ---
+        function showModal(title, contentHTML) {
+            const modalHTML = `
+                <div id="modal-backdrop" class="fixed inset-0 bg-black bg-opacity-70 z-50 flex justify-center items-center p-4">
+                    <div class="bg-zinc-900 rounded-2xl shadow-2xl w-full max-w-lg border border-zinc-800">
+                        <div class="flex justify-between items-center p-5 border-b border-zinc-800">
+                            <h3 class="text-xl font-bold text-white">${title}</h3>
+                            <button id="modal-close-btn" class="text-zinc-400 hover:text-white">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                            </button>
+                        </div>
+                        <div class="p-6">${contentHTML}</div>
+                    </div>
+                </div>
+            `;
+            modalContainer.innerHTML = modalHTML;
+            document.getElementById('modal-close-btn').addEventListener('click', closeModal);
+            document.getElementById('modal-backdrop').addEventListener('click', (e) => {
+                if (e.target.id === 'modal-backdrop') closeModal();
+            });
+        }
+
+        function closeModal() {
+            modalContainer.innerHTML = '';
+        }
+
+        // --- Funções de Renderização ---
+
+        // Renderiza o componente principal baseado no estado do usuário
+        function renderApp() {
+            const savedUser = localStorage.getItem('currentUser');
+            if (savedUser) {
+                state.user = JSON.parse(savedUser);
+            }
+
+            if (!state.user) {
+                renderLoginPage();
+            } else if (state.user.role === 'admin') {
+                renderAdminApp();
+            } else if (state.user.role === 'guard') {
+                renderGuardApp();
+            }
+        }
+
+        // --- TELA DE LOGIN ---
+        function renderLoginPage() {
+            appRoot.innerHTML = `
+                <div class="min-h-screen bg-black flex flex-col justify-center items-center p-4">
+                    <div class="w-full max-w-md">
+                        <div class="flex items-center justify-center mb-8 space-x-4">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-green-500"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                            <h1 class="text-3xl font-bold text-white">Controle de Frota</h1>
+                        </div>
+                        <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800">
+                            <div class="flex border-b border-zinc-700 mb-6">
+                                <button id="admin-tab" class="flex-1 py-3 text-center font-semibold transition-colors text-green-400 border-b-2 border-green-400">Base (Admin)</button>
+                                <button id="guard-tab" class="flex-1 py-3 text-center font-semibold transition-colors text-zinc-400">Guarda</button>
+                            </div>
+                            <div id="login-error" class="hidden bg-red-900/50 text-red-300 text-center p-3 rounded-lg mb-4"></div>
+                            <div id="admin-login-form">
+                                <div class="space-y-4">
+                                    <input id="admin-password" type="password" placeholder="Senha do Administrador" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                                    <button id="admin-login-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg flex items-center justify-center space-x-2 transition-colors">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" x2="3" y1="12" y2="12"/></svg>
+                                        <span>Entrar como Base</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="guard-login-form" class="hidden">
+                                <div class="space-y-4">
+                                    <input id="guard-badge" placeholder="Matrícula" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                                    <input id="guard-password" type="password" placeholder="Senha" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                                    <button id="guard-login-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg flex items-center justify-center space-x-2 transition-colors">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" x2="3" y1="12" y2="12"/></svg>
+                                        <span>Entrar como Guarda</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            attachLoginListeners();
+        }
+
+        function attachLoginListeners() {
+            const adminTab = document.getElementById('admin-tab');
+            const guardTab = document.getElementById('guard-tab');
+            const adminForm = document.getElementById('admin-login-form');
+            const guardForm = document.getElementById('guard-login-form');
+            const errorDiv = document.getElementById('login-error');
+
+            const switchTab = (activeTab) => {
+                errorDiv.classList.add('hidden');
+                if (activeTab === 'admin') {
+                    adminTab.classList.add('text-green-400', 'border-green-400');
+                    adminTab.classList.remove('text-zinc-400');
+                    guardTab.classList.remove('text-green-400', 'border-green-400');
+                    guardTab.classList.add('text-zinc-400');
+                    adminForm.classList.remove('hidden');
+                    guardForm.classList.add('hidden');
+                } else {
+                    guardTab.classList.add('text-green-400', 'border-green-400');
+                    guardTab.classList.remove('text-zinc-400');
+                    adminTab.classList.remove('text-green-400', 'border-green-400');
+                    adminTab.classList.add('text-zinc-400');
+                    guardForm.classList.remove('hidden');
+                    adminForm.classList.add('hidden');
+                }
+            };
+
+            adminTab.addEventListener('click', () => switchTab('admin'));
+            guardTab.addEventListener('click', () => switchTab('guard'));
+
+            document.getElementById('admin-login-btn').addEventListener('click', handleAdminLogin);
+            document.getElementById('guard-login-btn').addEventListener('click', handleGuardLogin);
+        }
+
+        function handleLogin(userData) {
+            localStorage.setItem('currentUser', JSON.stringify(userData));
+            state.user = userData;
+            renderApp();
+        }
+
+        function handleLogout() {
+            // Unsubscribe from all listeners before logging out
+            Object.values(state.listeners).forEach(unsubscribe => unsubscribe());
+            state.listeners = {};
+
+            localStorage.removeItem('currentUser');
+            state.user = null;
+            renderApp();
+        }
+
+        async function handleAdminLogin() {
+            const password = document.getElementById('admin-password').value;
+            const errorDiv = document.getElementById('login-error');
+            if (password === 'admin123') {
+                handleLogin({ role: 'admin' });
+            } else {
+                errorDiv.textContent = 'Senha de administrador incorreta.';
+                errorDiv.classList.remove('hidden');
+            }
+        }
+
+        async function handleGuardLogin() {
+            const badge = document.getElementById('guard-badge').value;
+            const password = document.getElementById('guard-password').value;
+            const errorDiv = document.getElementById('login-error');
+
+            const q = query(collection(db, "guards"), where("badge", "==", badge), where("password", "==", password));
+            const querySnapshot = await getDocs(q);
+
+            if (querySnapshot.empty) {
+                errorDiv.textContent = 'Matrícula ou senha inválida.';
+                errorDiv.classList.remove('hidden');
+            } else {
+                const guardDoc = querySnapshot.docs[0];
+                handleLogin({ role: 'guard', id: guardDoc.id, name: guardDoc.data().name });
+            }
+        }
+
+        // --- ADMIN APP ---
+        function renderAdminApp() {
+            appRoot.innerHTML = `
+                <div class="bg-black text-white h-screen flex flex-col">
+                    <main id="admin-content" class="flex-grow p-4 sm:p-6 lg:p-8 overflow-y-auto pb-24"></main>
+                    <nav class="bg-zinc-950 border-t border-zinc-800 p-2 flex justify-around z-10">
+                        <button data-view="dashboard" class="admin-nav-item flex flex-col items-center justify-center space-y-1 w-full p-2 rounded-lg transition-colors">
+                           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>
+                           <span class="text-xs font-medium">Dashboard</span>
+                        </button>
+                        <button data-view="guards" class="admin-nav-item flex flex-col items-center justify-center space-y-1 w-full p-2 rounded-lg transition-colors">
+                           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                           <span class="text-xs font-medium">Guardas</span>
+                        </button>
+                        <button data-view="vehicles" class="admin-nav-item flex flex-col items-center justify-center space-y-1 w-full p-2 rounded-lg transition-colors">
+                           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 16.5 17.5 13H22v-2h-4.5l-3.5 3.5"/><path d="M8 5H4a2 2 0 0 0-2 2v10h3"/><path d="M19 17h-5.73"/><path d="M5 17H3"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>
+                           <span class="text-xs font-medium">Veículos</span>
+                        </button>
+                        <button data-view="report" class="admin-nav-item flex flex-col items-center justify-center space-y-1 w-full p-2 rounded-lg transition-colors">
+                           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>
+                           <span class="text-xs font-medium">Relatórios</span>
+                        </button>
+                        <button id="admin-logout-btn" class="flex flex-col items-center justify-center space-y-1 w-full p-2 rounded-lg transition-colors text-zinc-400 hover:bg-zinc-700">
+                           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+                           <span class="text-xs font-medium">Sair</span>
+                        </button>
+                    </nav>
+                </div>
+            `;
+            attachAdminListeners();
+            setupFirestoreListeners(['guards', 'vehicles', 'trips', 'maintenances'], renderAdminContent);
+        }
+
+        // ... (O restante do código JavaScript continua aqui)
+
+        function attachAdminListeners() {
+            document.querySelectorAll('.admin-nav-item').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const view = e.currentTarget.dataset.view;
+                    state.adminView = { page: view, id: null };
+                    renderAdminContent();
+                });
+            });
+            document.getElementById('admin-logout-btn').addEventListener('click', handleLogout);
+        }
+
+        function renderAdminContent() {
+            const contentEl = document.getElementById('admin-content');
+            if (!contentEl) return;
+
+            // Atualiza o estado ativo da navegação
+            document.querySelectorAll('.admin-nav-item').forEach(btn => {
+                if (btn.dataset.view === state.adminView.page) {
+                    btn.classList.add('bg-green-600', 'text-white');
+                    btn.classList.remove('text-zinc-400', 'hover:bg-zinc-700');
+                } else {
+                    btn.classList.remove('bg-green-600', 'text-white');
+                    btn.classList.add('text-zinc-400', 'hover:bg-zinc-700');
+                }
+            });
+
+            switch (state.adminView.page) {
+                case 'dashboard':
+                    renderAdminDashboard(contentEl);
+                    break;
+                case 'guards':
+                    renderAdminGuards(contentEl);
+                    break;
+                case 'vehicles':
+                    renderAdminVehicles(contentEl);
+                    break;
+                case 'report':
+                    renderAdvancedReports(contentEl);
+                    break;
+                case 'vehicleDetails':
+                    renderVehicleDetails(contentEl, state.adminView.id);
+                    break;
+                case 'guardDetails':
+                    renderGuardDetails(contentEl, state.adminView.id);
+                    break;
+            }
+        }
+
+        // --- ADMIN: DASHBOARD ---
+        function renderAdminDashboard(container) {
+            const now = new Date();
+            const currentMonth = now.getMonth();
+            const currentYear = now.getFullYear();
+
+            const monthlyKm = state.trips
+                .filter(trip => {
+                    const tripDate = new Date(trip.date);
+                    return tripDate.getMonth() === currentMonth && tripDate.getFullYear() === currentYear;
+                })
+                .reduce((acc, trip) => acc + (trip.endKm - trip.startKm), 0);
+
+            const vehiclesInUse = state.vehicles.filter(v => v.status === 'em_uso').length;
+
+            const getStatusInfo = (status) => {
+                switch (status) {
+                    case 'disponivel': return { text: 'Disponível', color: 'border-green-500', textColor: 'text-green-400' };
+                    case 'em_uso': return { text: 'Em Uso', color: 'border-yellow-500', textColor: 'text-yellow-400' };
+                    case 'em_manutencao': return { text: 'Em Manutenção', color: 'border-red-500', textColor: 'text-red-400' };
+                    default: return { text: 'Desconhecido', color: 'border-zinc-500', textColor: 'text-zinc-400' };
+                }
+            };
+
+            container.innerHTML = `
+                <div>
+                    <h2 class="text-3xl font-bold text-white mb-6">Dashboard</h2>
+                    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-6 mb-8">
+                        <!-- Cards de Métricas -->
+                        <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 text-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto h-8 w-8 text-green-500 mb-2"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                            <p class="text-3xl font-bold text-white">${state.guards.length}</p>
+                            <p class="text-zinc-400">Guardas Totais</p>
+                        </div>
+                        <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 text-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto h-8 w-8 text-green-500 mb-2"><path d="M14 16.5 17.5 13H22v-2h-4.5l-3.5 3.5"/><path d="M8 5H4a2 2 0 0 0-2 2v10h3"/><path d="M19 17h-5.73"/><path d="M5 17H3"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>
+                            <p class="text-3xl font-bold text-white">${state.vehicles.length}</p>
+                            <p class="text-zinc-400">Veículos Totais</p>
+                        </div>
+                        <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 text-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto h-8 w-8 text-yellow-500 mb-2"><path d="M14 16.5 17.5 13H22v-2h-4.5l-3.5 3.5"/><path d="M8 5H4a2 2 0 0 0-2 2v10h3"/><path d="M19 17h-5.73"/><path d="M5 17H3"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>
+                            <p class="text-3xl font-bold text-white">${vehiclesInUse}</p>
+                            <p class="text-zinc-400">Veículos em Uso</p>
+                        </div>
+                        <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 text-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto h-8 w-8 text-yellow-500 mb-2"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                            <p class="text-3xl font-bold text-white">${vehiclesInUse}</p>
+                            <p class="text-zinc-400">Guardas em Turno</p>
+                        </div>
+                        <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 text-center col-span-2 md:col-span-1 lg:col-span-1">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mx-auto h-8 w-8 text-green-500 mb-2"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg>
+                            <p class="text-3xl font-bold text-white">${monthlyKm.toLocaleString('pt-BR')}</p>
+                            <p class="text-zinc-400">Km Rodados no Mês</p>
+                        </div>
+                    </div>
+                    <h3 class="text-2xl font-semibold text-white mb-4">Status Detalhado da Frota</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        ${state.vehicles.map(v => {
+                const guard = v.currentGuardId ? state.guards.find(g => g.id === v.currentGuardId) : null;
+                const statusInfo = getStatusInfo(v.status);
+                return `
+                                <div data-vehicle-id="${v.id}" class="vehicle-details-link bg-zinc-900 p-6 rounded-xl border border-zinc-800 border-l-4 ${statusInfo.color} cursor-pointer hover:bg-zinc-800">
+                                    <p class="font-bold text-xl text-white">${v.model} (${v.plate})</p>
+                                    <p class="font-semibold ${statusInfo.textColor}">
+                                        ${v.status === 'em_uso' ? `${statusInfo.text} por ${guard?.name || 'Desconhecido'}` : statusInfo.text}
+                                    </p>
+                                    <p class="text-sm text-zinc-400 mt-2">KM Atual: ${v.currentKm.toLocaleString('pt-BR')} km</p>
+                                </div>
+                            `
+            }).join('')}
+                    </div>
+                </div>
+            `;
+
+            document.querySelectorAll('.vehicle-details-link').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    const vehicleId = e.currentTarget.dataset.vehicleId;
+                    state.adminView = { page: 'vehicleDetails', id: vehicleId };
+                    renderAdminContent();
+                });
+            });
+        }
+
+        // --- ADMIN: GUARDAS ---
+        function renderAdminGuards(container) {
+            container.innerHTML = `
+                <div>
+                    <h2 class="text-3xl font-bold text-white mb-6">Gerenciar Guardas</h2>
+                    <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 mb-8">
+                        <h3 class="text-xl font-semibold mb-4 text-white">Adicionar Novo Guarda</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <input id="guard-name-input" placeholder="Nome do Guarda" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                            <input id="guard-badge-input" placeholder="Matrícula" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                            <input id="guard-password-input" placeholder="Senha" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                        </div>
+                        <button id="add-guard-btn" class="w-full mt-4 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg flex items-center justify-center space-x-2 transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
+                            <span>Adicionar</span>
+                        </button>
+                    </div>
+                    <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800">
+                        <ul id="guards-list" class="divide-y divide-zinc-800">
+                            ${state.guards.map(guard => `
+                                <li key="${guard.id}" class="p-4 flex justify-between items-center">
+                                    <div class="cursor-pointer guard-details-link" data-guard-id="${guard.id}">
+                                        <p class="font-semibold text-white">${guard.name}</p>
+                                        <p class="text-sm text-zinc-400">Matrícula: ${guard.badge}</p>
+                                    </div>
+                                    <div class="flex gap-2">
+                                        <button class="edit-guard-btn text-blue-500 hover:text-blue-400 p-2 rounded-full hover:bg-zinc-800" data-guard-id="${guard.id}"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></button>
+                                        <button class="delete-guard-btn text-red-500 hover:text-red-400 p-2 rounded-full hover:bg-zinc-800" data-guard-id="${guard.id}"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg></button>
+                                    </div>
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                </div>
+            `;
+            attachAdminGuardsListeners();
+        }
+
+        function attachAdminGuardsListeners() {
+            document.getElementById('add-guard-btn').addEventListener('click', async () => {
+                const name = document.getElementById('guard-name-input').value;
+                const badge = document.getElementById('guard-badge-input').value;
+                const password = document.getElementById('guard-password-input').value;
+                if (!name || !badge || !password) {
+                    showToast('Preencha todos os campos.', 'error');
+                    return;
+                }
+                await addDoc(collection(db, 'guards'), { name, badge, password });
+                document.getElementById('guard-name-input').value = '';
+                document.getElementById('guard-badge-input').value = '';
+                document.getElementById('guard-password-input').value = '';
+                showToast('Guarda adicionado com sucesso!');
+            });
+
+            document.querySelectorAll('.delete-guard-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const guardId = e.currentTarget.dataset.guardId;
+                    if (confirm('Tem certeza que deseja remover este guarda?')) {
+                        await deleteDoc(doc(db, 'guards', guardId));
+                        showToast('Guarda removido.');
+                    }
+                });
+            });
+
+            document.querySelectorAll('.edit-guard-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const guardId = e.currentTarget.dataset.guardId;
+                    const guard = state.guards.find(g => g.id === guardId);
+                    const modalContent = `
+                        <div class="space-y-4">
+                            <input id="edit-guard-name" name="name" value="${guard.name}" placeholder="Nome do Guarda" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                            <input id="edit-guard-badge" name="badge" value="${guard.badge}" placeholder="Matrícula" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                            <input id="edit-guard-password" name="password" value="${guard.password}" placeholder="Senha" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                            <div class="flex justify-end gap-4 pt-4">
+                                <button id="cancel-edit-guard" class="bg-zinc-700 hover:bg-zinc-600 text-white font-bold py-2 px-6 rounded-lg">Cancelar</button>
+                                <button id="save-edit-guard" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg">Salvar</button>
+                            </div>
+                        </div>
+                    `;
+                    showModal('Editar Guarda', modalContent);
+                    document.getElementById('cancel-edit-guard').addEventListener('click', closeModal);
+                    document.getElementById('save-edit-guard').addEventListener('click', async () => {
+                        const updatedGuard = {
+                            name: document.getElementById('edit-guard-name').value,
+                            badge: document.getElementById('edit-guard-badge').value,
+                            password: document.getElementById('edit-guard-password').value
+                        };
+                        const guardRef = doc(db, 'guards', guardId);
+                        await updateDoc(guardRef, updatedGuard);
+                        closeModal();
+                        showToast('Guarda atualizado com sucesso!');
+                    });
+                });
+            });
+
+            document.querySelectorAll('.guard-details-link').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    state.adminView = { page: 'guardDetails', id: e.currentTarget.dataset.guardId };
+                    renderAdminContent();
+                });
+            });
+        }
+
+        // --- ADMIN: VEÍCULOS ---
+        function renderAdminVehicles(container) {
+            container.innerHTML = `
+                <div>
+                    <h2 class="text-3xl font-bold text-white mb-6">Gerenciar Frota</h2>
+                    <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 mb-8">
+                        <h3 class="text-xl font-semibold mb-4 text-white">Adicionar Novo Veículo</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <input id="vehicle-model-input" placeholder="Modelo" class="md:col-span-2 w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                            <input id="vehicle-plate-input" placeholder="Placa" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                            <input id="vehicle-km-input" type="number" placeholder="KM Inicial" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                        </div>
+                        <button id="add-vehicle-btn" class="w-full mt-4 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg flex items-center justify-center space-x-2 transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
+                            <span>Adicionar Veículo</span>
+                        </button>
+                    </div>
+                    <div id="vehicles-list" class="space-y-4">
+                        ${state.vehicles.map(vehicle => `
+                             <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 flex flex-col md:flex-row justify-between md:items-center">
+                                <div class="cursor-pointer vehicle-details-link" data-vehicle-id="${vehicle.id}">
+                                    <p class="font-bold text-xl text-white">${vehicle.model}</p>
+                                    <p class="text-zinc-400">Placa: ${vehicle.plate}</p>
+                                    <p class="text-green-400 font-semibold mt-1">KM Atual: ${vehicle.currentKm.toLocaleString('pt-BR')} km</p>
+                                </div>
+                                <div class="flex items-center gap-2 mt-4 md:mt-0">
+                                    <select data-vehicle-id="${vehicle.id}" class="status-select w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none">
+                                        <option value="disponivel" ${vehicle.status === 'disponivel' ? 'selected' : ''}>Disponível</option>
+                                        <option value="em_uso" ${vehicle.status === 'em_uso' ? 'selected' : ''}>Em Uso</option>
+                                        <option value="em_manutencao" ${vehicle.status === 'em_manutencao' ? 'selected' : ''}>Em Manutenção</option>
+                                    </select>
+                                    <button class="edit-vehicle-btn text-blue-500 hover:text-blue-400 p-2 rounded-full hover:bg-zinc-800" data-vehicle-id="${vehicle.id}"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg></button>
+                                    <button class="delete-vehicle-btn text-red-500 hover:text-red-400 p-2 rounded-full hover:bg-zinc-800" data-vehicle-id="${vehicle.id}"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg></button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+             `;
+            attachAdminVehiclesListeners();
+        }
+
+        function attachAdminVehiclesListeners() {
+            document.getElementById('add-vehicle-btn').addEventListener('click', async () => {
+                const model = document.getElementById('vehicle-model-input').value;
+                const plate = document.getElementById('vehicle-plate-input').value;
+                const initialKm = document.getElementById('vehicle-km-input').value;
+                if (!model || !plate || !initialKm) {
+                    showToast('Preencha todos os campos.', 'error');
+                    return;
+                }
+                const newVehicle = {
+                    model, plate,
+                    initialKm: parseInt(initialKm),
+                    currentKm: parseInt(initialKm),
+                    status: 'disponivel',
+                    currentGuardId: null
+                };
+                await addDoc(collection(db, 'vehicles'), newVehicle);
+                document.getElementById('vehicle-model-input').value = '';
+                document.getElementById('vehicle-plate-input').value = '';
+                document.getElementById('vehicle-km-input').value = '';
+                showToast('Veículo adicionado com sucesso!');
+            });
+
+            document.querySelectorAll('.delete-vehicle-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const vehicleId = e.currentTarget.dataset.vehicleId;
+                    if (confirm('Tem certeza que deseja remover este veículo?')) {
+                        await deleteDoc(doc(db, 'vehicles', vehicleId));
+                        showToast('Veículo removido.');
+                    }
+                });
+            });
+
+            document.querySelectorAll('.status-select').forEach(select => {
+                select.addEventListener('change', async (e) => {
+                    const vehicleId = e.currentTarget.dataset.vehicleId;
+                    const newStatus = e.target.value;
+                    const vehicleRef = doc(db, 'vehicles', vehicleId);
+                    const vehicle = state.vehicles.find(v => v.id === vehicleId);
+                    await updateDoc(vehicleRef, {
+                        status: newStatus,
+                        currentGuardId: newStatus === 'disponivel' ? null : (vehicle?.currentGuardId || null)
+                    });
+                });
+            });
+
+            document.querySelectorAll('.edit-vehicle-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const vehicleId = e.currentTarget.dataset.vehicleId;
+                    const vehicle = state.vehicles.find(v => v.id === vehicleId);
+                    const modalContent = `
+                        <div class="space-y-4">
+                            <input id="edit-vehicle-model" name="model" value="${vehicle.model}" placeholder="Modelo" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                            <input id="edit-vehicle-plate" name="plate" value="${vehicle.plate}" placeholder="Placa" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                            <p class="text-sm text-zinc-400">O KM inicial e atual não podem ser editados diretamente. Eles são atualizados através dos registros de viagem.</p>
+                            <div class="flex justify-end gap-4 pt-4">
+                                <button id="cancel-edit-vehicle" class="bg-zinc-700 hover:bg-zinc-600 text-white font-bold py-2 px-6 rounded-lg">Cancelar</button>
+                                <button id="save-edit-vehicle" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg">Salvar</button>
+                            </div>
+                        </div>
+                    `;
+                    showModal('Editar Veículo', modalContent);
+                    document.getElementById('cancel-edit-vehicle').addEventListener('click', closeModal);
+                    document.getElementById('save-edit-vehicle').addEventListener('click', async () => {
+                        const updatedVehicle = {
+                            model: document.getElementById('edit-vehicle-model').value,
+                            plate: document.getElementById('edit-vehicle-plate').value
+                        };
+                        const vehicleRef = doc(db, 'vehicles', vehicleId);
+                        await updateDoc(vehicleRef, updatedVehicle);
+                        closeModal();
+                        showToast('Veículo atualizado com sucesso!');
+                    });
+                });
+            });
+
+            document.querySelectorAll('.vehicle-details-link').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    state.adminView = { page: 'vehicleDetails', id: e.currentTarget.dataset.vehicleId };
+                    renderAdminContent();
+                });
+            });
+        }
+
+        // --- ADMIN: RELATÓRIOS ---
+        function renderAdvancedReports(container) {
+            container.innerHTML = `
+                <div>
+                    <h2 class="text-3xl font-bold text-white mb-6">Relatórios Avançados</h2>
+                    <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 mb-8">
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                            <input id="report-start-date" type="date" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                            <input id="report-end-date" type="date" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                            <select id="report-vehicle-select" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none">
+                                <option value="">Todos os Veículos</option>
+                                ${state.vehicles.map(v => `<option value="${v.id}">${v.model} - ${v.plate}</option>`).join('')}
+                            </select>
+                            <select id="report-guard-select" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none">
+                                <option value="">Todos os Guardas</option>
+                                ${state.guards.map(g => `<option value="${g.id}">${g.name}</option>`).join('')}
+                            </select>
+                            <button id="export-pdf-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg flex items-center justify-center space-x-2 transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                                <span>Exportar PDF</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div>
+                            <h3 class="text-2xl font-semibold text-white mb-4">Viagens Filtradas</h3>
+                            <div id="filtered-trips-container" class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 max-h-96 overflow-y-auto"></div>
+                        </div>
+                        <div>
+                            <h3 class="text-2xl font-semibold text-white mb-4">Manutenções Filtradas</h3>
+                            <div id="filtered-maintenances-container" class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 max-h-96 overflow-y-auto"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            attachAdvancedReportsListeners();
+            updateFilteredReports(); // Render inicial
+        }
+
+        function updateFilteredReports() {
+            const startDate = document.getElementById('report-start-date').value;
+            const endDate = document.getElementById('report-end-date').value;
+            const selectedVehicle = document.getElementById('report-vehicle-select').value;
+            const selectedGuard = document.getElementById('report-guard-select').value;
+
+            const filteredTrips = state.trips.filter(trip => {
+                const tripDate = new Date(trip.date);
+                const start = startDate ? new Date(startDate) : null;
+                const end = endDate ? new Date(endDate) : null;
+                if (start && tripDate < start) return false;
+                if (end && tripDate > end) return false;
+                if (selectedVehicle && trip.vehicleId !== selectedVehicle) return false;
+                if (selectedGuard && trip.guardId !== selectedGuard) return false;
+                return true;
+            });
+
+            const filteredMaintenances = state.maintenances.filter(maint => {
+                const maintDate = new Date(maint.date);
+                const start = startDate ? new Date(startDate) : null;
+                const end = endDate ? new Date(endDate) : null;
+                if (start && maintDate < start) return false;
+                if (end && maintDate > end) return false;
+                if (selectedVehicle && maint.vehicleId !== selectedVehicle) return false;
+                return true;
+            });
+
+            const tripsContainer = document.getElementById('filtered-trips-container');
+            const maintenancesContainer = document.getElementById('filtered-maintenances-container');
+
+            if (tripsContainer) {
+                tripsContainer.innerHTML = `
+                    <ul class="divide-y divide-zinc-800">
+                        ${filteredTrips.map(trip => {
+                    const vehicle = state.vehicles.find(v => v.id === trip.vehicleId);
+                    return `
+                                <li class="p-4">
+                                    <p class="font-semibold text-white">${vehicle?.model} (${vehicle?.plate})</p>
+                                    <p class="text-sm text-zinc-400">Guarda: ${trip.guardName} | Data: ${new Date(trip.date).toLocaleDateString('pt-BR')}</p>
+                                    <p class="text-sm text-green-400">Distância: ${(trip.endKm - trip.startKm).toLocaleString('pt-BR')} km</p>
+                                </li>
+                            `;
+                }).join('')}
+                    </ul>
+                `;
+            }
+
+            if (maintenancesContainer) {
+                maintenancesContainer.innerHTML = `
+                    <ul class="divide-y divide-zinc-800">
+                        ${filteredMaintenances.map(maint => {
+                    const vehicle = state.vehicles.find(v => v.id === maint.vehicleId);
+                    return `
+                                <li class="p-4">
+                                    <p class="font-semibold text-white">${vehicle?.model} (${vehicle?.plate})</p>
+                                    <p class="text-sm text-zinc-400">Data: ${new Date(maint.date).toLocaleDateString('pt-BR')} | KM: ${maint.km.toLocaleString('pt-BR')}</p>
+                                    <p class="text-sm text-yellow-400 mt-1">${maint.service}</p>
+                                </li>
+                            `;
+                }).join('')}
+                    </ul>
+                `;
+            }
+        }
+
+        function attachAdvancedReportsListeners() {
+            document.getElementById('report-start-date').addEventListener('change', updateFilteredReports);
+            document.getElementById('report-end-date').addEventListener('change', updateFilteredReports);
+            document.getElementById('report-vehicle-select').addEventListener('change', updateFilteredReports);
+            document.getElementById('report-guard-select').addEventListener('change', updateFilteredReports);
+            document.getElementById('export-pdf-btn').addEventListener('click', exportPDF);
+        }
+
+        function exportPDF() {
+            if (!window.jspdf || !window.jspdf.jsPDF || !window.jspdf.jsPDF.autoTable) {
+                showToast('A biblioteca de PDF ainda está carregando. Tente novamente.', 'error');
+                return;
+            }
+
+            const startDate = document.getElementById('report-start-date').value;
+            const endDate = document.getElementById('report-end-date').value;
+            const selectedVehicle = document.getElementById('report-vehicle-select').value;
+            const selectedGuard = document.getElementById('report-guard-select').value;
+
+            const filteredTrips = state.trips.filter(trip => {
+                const tripDate = new Date(trip.date);
+                const start = startDate ? new Date(startDate) : null;
+                const end = endDate ? new Date(endDate) : null;
+                if (start && tripDate < start) return false;
+                if (end && tripDate > end) return false;
+                if (selectedVehicle && trip.vehicleId !== selectedVehicle) return false;
+                if (selectedGuard && trip.guardId !== selectedGuard) return false;
+                return true;
+            });
+
+            const filteredMaintenances = state.maintenances.filter(maint => {
+                const maintDate = new Date(maint.date);
+                const start = startDate ? new Date(startDate) : null;
+                const end = endDate ? new Date(endDate) : null;
+                if (start && maintDate < start) return false;
+                if (end && maintDate > end) return false;
+                if (selectedVehicle && maint.vehicleId !== selectedVehicle) return false;
+                return true;
+            });
+
+            const doc = new window.jspdf.jsPDF();
+            doc.text("Relatório de Frota", 14, 16);
+
+            if (filteredTrips.length > 0) {
+                doc.autoTable({
+                    startY: 22,
+                    head: [['Data', 'Guarda', 'Veículo', 'Distância (km)']],
+                    body: filteredTrips.map(trip => {
+                        const vehicle = state.vehicles.find(v => v.id === trip.vehicleId);
+                        return [
+                            new Date(trip.date).toLocaleDateString('pt-BR'),
+                            trip.guardName,
+                            `${vehicle?.model} (${vehicle?.plate})`,
+                            (trip.endKm - trip.startKm).toLocaleString('pt-BR')
+                        ];
+                    }),
+                    didDrawPage: (data) => {
+                        doc.text('Viagens Realizadas', data.settings.margin.left, 15);
+                    }
+                });
+            }
+
+            if (filteredMaintenances.length > 0) {
+                doc.autoTable({
+                    startY: doc.previousAutoTable ? doc.previousAutoTable.finalY + 15 : 22,
+                    head: [['Data', 'Veículo', 'KM', 'Serviço']],
+                    body: filteredMaintenances.map(maint => {
+                        const vehicle = state.vehicles.find(v => v.id === maint.vehicleId);
+                        return [
+                            new Date(maint.date).toLocaleDateString('pt-BR'),
+                            `${vehicle?.model} (${vehicle?.plate})`,
+                            maint.km.toLocaleString('pt-BR'),
+                            maint.service
+                        ];
+                    }),
+                    didDrawPage: (data) => {
+                        doc.text('Manutenções Realizadas', data.settings.margin.left, doc.previousAutoTable ? doc.previousAutoTable.finalY + 10 : 15);
+                    }
+                });
+            }
+
+            doc.save('relatorio_frota.pdf');
+        }
+
+        // --- ADMIN: PÁGINAS DE DETALHES ---
+        function renderVehicleDetails(container, vehicleId) {
+            const vehicle = state.vehicles.find(v => v.id === vehicleId);
+            if (!vehicle) {
+                container.innerHTML = `<p>Veículo não encontrado.</p>`;
+                return;
+            }
+            const vehicleTrips = state.trips.filter(t => t.vehicleId === vehicle.id);
+            const vehicleMaintenances = state.maintenances.filter(m => m.vehicleId === vehicle.id);
+
+            container.innerHTML = `
+                <div>
+                    <button id="back-to-vehicles-btn" class="flex items-center gap-2 text-zinc-400 hover:text-white mb-6">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" x2="5" y1="12" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                        Voltar
+                    </button>
+                    <h2 class="text-3xl font-bold text-white mb-2">${vehicle.model} (${vehicle.plate})</h2>
+                    <p class="text-zinc-400 mb-6">KM Atual: ${vehicle.currentKm.toLocaleString('pt-BR')} km</p>
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div>
+                            <h3 class="text-2xl font-semibold text-white mb-4">Histórico de Viagens</h3>
+                            <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 max-h-96 overflow-y-auto">
+                                <ul class="divide-y divide-zinc-800">
+                                    ${vehicleTrips.map(trip => `
+                                        <li class="p-4">
+                                            <p class="font-semibold text-white">Guarda: ${trip.guardName}</p>
+                                            <p class="text-sm text-zinc-400">Data: ${new Date(trip.date).toLocaleDateString('pt-BR')}</p>
+                                            <p class="text-sm text-green-400">Distância: ${(trip.endKm - trip.startKm).toLocaleString('pt-BR')} km</p>
+                                        </li>
+                                    `).join('')}
+                                </ul>
+                            </div>
+                        </div>
+                        <div>
+                            <h3 class="text-2xl font-semibold text-white mb-4">Histórico de Manutenções</h3>
+                            <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 max-h-96 overflow-y-auto">
+                                <ul class="divide-y divide-zinc-800">
+                                    ${vehicleMaintenances.map(maint => `
+                                        <li class="p-4">
+                                            <p class="font-semibold text-white">${maint.service}</p>
+                                            <p class="text-sm text-zinc-400">Data: ${new Date(maint.date).toLocaleDateString('pt-BR')} | KM: ${maint.km.toLocaleString('pt-BR')}</p>
+                                        </li>
+                                    `).join('')}
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('back-to-vehicles-btn').addEventListener('click', () => {
+                state.adminView = { page: 'dashboard' };
+                renderAdminContent();
+            });
+        }
+
+        function renderGuardDetails(container, guardId) {
+            const guard = state.guards.find(g => g.id === guardId);
+            if (!guard) {
+                container.innerHTML = `<p>Guarda não encontrado.</p>`;
+                return;
+            }
+            const guardTrips = state.trips.filter(t => t.guardId === guard.id);
+
+            container.innerHTML = `
+                <div>
+                    <button id="back-to-guards-btn" class="flex items-center gap-2 text-zinc-400 hover:text-white mb-6">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" x2="5" y1="12" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                        Voltar
+                    </button>
+                    <h2 class="text-3xl font-bold text-white mb-2">${guard.name}</h2>
+                    <p class="text-zinc-400 mb-6">Matrícula: ${guard.badge}</p>
+                    <h3 class="text-2xl font-semibold text-white mb-4">Histórico de Viagens</h3>
+                    <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 max-h-[30rem] overflow-y-auto">
+                        <ul class="divide-y divide-zinc-800">
+                            ${guardTrips.map(trip => {
+                const vehicle = state.vehicles.find(v => v.id === trip.vehicleId);
+                return `
+                                    <li class="p-4">
+                                        <p class="font-semibold text-white">${vehicle?.model} (${vehicle?.plate})</p>
+                                        <p class="text-sm text-zinc-400">Data: ${new Date(trip.date).toLocaleDateString('pt-BR')}</p>
+                                        <p class="text-sm text-green-400">Distância: ${(trip.endKm - trip.startKm).toLocaleString('pt-BR')} km</p>
+                                    </li>
+                                `;
+            }).join('')}
+                        </ul>
+                    </div>
+                </div>
+            `;
+            document.getElementById('back-to-guards-btn').addEventListener('click', () => {
+                state.adminView = { page: 'guards' };
+                renderAdminContent();
+            });
+        }
+
+        // --- GUARD APP ---
+        function renderGuardApp() {
+            setupFirestoreListeners(['vehicles'], renderGuardContent);
+        }
+
+        function renderGuardContent() {
+            const activeVehicle = state.vehicles.find(v => v.currentGuardId === state.user.id);
+
+            if (!activeVehicle) {
+                appRoot.innerHTML = `
+                    <div class="bg-black min-h-screen text-white p-4 sm:p-8">
+                        <div class="flex justify-between items-center">
+                            <h2 class="text-3xl font-bold text-white">Olá, ${state.user.name}!</h2>
+                            <button id="guard-logout-btn" class="text-zinc-400 hover:text-white flex items-center space-x-2">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+                                <span>Sair</span>
+                            </button>
+                        </div>
+                        <h3 class="text-xl text-zinc-300 mt-2 mb-6">Selecione um veículo para iniciar o turno.</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            ${state.vehicles.filter(v => v.status === 'disponivel').map(v => `
+                                <button data-vehicle-id="${v.id}" class="select-vehicle-btn text-left">
+                                    <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 hover:border-green-500 transition-colors">
+                                        <p class="font-bold text-xl text-white">${v.model}</p>
+                                        <p class="text-zinc-400">Placa: ${v.plate}</p>
+                                        <p class="text-green-400 font-semibold mt-1">KM Atual: ${v.currentKm.toLocaleString('pt-BR')} km</p>
+                                    </div>
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+                attachGuardSelectionListeners();
+            } else {
+                appRoot.innerHTML = `
+                    <div class="bg-black text-white h-screen flex flex-col">
+                        <div class="flex-grow p-4 sm:p-8 overflow-y-auto pb-24">
+                            <div class="bg-zinc-950 p-6 rounded-xl border border-zinc-800 mb-6">
+                                <div class="flex flex-col sm:flex-row justify-between sm:items-center">
+                                    <div>
+                                        <h2 class="text-3xl font-bold text-white">Turno Ativo</h2>
+                                        <p class="text-lg text-zinc-300">Veículo: <span class="font-bold text-green-400">${activeVehicle.model} (${activeVehicle.plate})</span></p>
+                                        <p class="text-sm text-zinc-400">KM Atual: ${activeVehicle.currentKm.toLocaleString('pt-BR')} km</p>
+                                    </div>
+                                    <button id="return-vehicle-btn" class="w-full sm:w-auto mt-4 sm:mt-0 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-6 rounded-lg flex items-center justify-center space-x-2 transition-colors">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+                                        <span>Devolver Veículo</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <main id="guard-form-container"></main>
+                        </div>
+                        <nav class="bg-zinc-950 border-t border-zinc-800 p-2 flex justify-around">
+                            <button data-view="trip" class="guard-nav-item flex flex-col items-center justify-center space-y-1 w-full p-2 rounded-lg transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                                <span class="text-xs font-medium">Registrar</span>
+                            </button>
+                            <button data-view="maintenance" class="guard-nav-item flex flex-col items-center justify-center space-y-1 w-full p-2 rounded-lg transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                                <span class="text-xs font-medium">Manutenção</span>
+                            </button>
+                            <button data-view="observation" class="guard-nav-item flex flex-col items-center justify-center space-y-1 w-full p-2 rounded-lg transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                                <span class="text-xs font-medium">Observação</span>
+                            </button>
+                            <button id="guard-logout-btn-active" class="flex flex-col items-center justify-center space-y-1 w-full p-2 rounded-lg transition-colors text-zinc-400 hover:bg-zinc-700">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>
+                                <span class="text-xs font-medium">Sair</span>
+                            </button>
+                        </nav>
+                    </div>
+                `;
+                renderGuardForm(activeVehicle);
+                attachGuardActiveListeners(activeVehicle);
+            }
+        }
+
+        function renderGuardForm(activeVehicle) {
+            const container = document.getElementById('guard-form-container');
+            if (!container) return;
+
+            // Atualiza estado da navegação
+            document.querySelectorAll('.guard-nav-item').forEach(btn => {
+                if (btn.dataset.view === state.guardView) {
+                    btn.classList.add('bg-green-600', 'text-white');
+                    btn.classList.remove('text-zinc-400', 'hover:bg-zinc-700');
+                } else {
+                    btn.classList.remove('bg-green-600', 'text-white');
+                    btn.classList.add('text-zinc-400', 'hover:bg-zinc-700');
+                }
+            });
+
+            let formHTML = '';
+            switch (state.guardView) {
+                case 'trip':
+                    formHTML = `
+                        <h3 class="text-xl font-semibold mb-4 text-white">Registrar Viagem</h3>
+                        <div class="space-y-4">
+                           <input type="number" value="${activeVehicle.currentKm}" readonly class="w-full bg-zinc-700 cursor-not-allowed border border-zinc-700 rounded-lg p-3 text-white" placeholder="KM de Saída" />
+                           <input id="end-km-input" type="number" placeholder="KM de Chegada" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                           <input id="trip-notes-input" placeholder="Anotações (opcional)" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                           <button id="register-trip-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg flex items-center justify-center space-x-2 transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="5" y2="19"/><line x1="5" x2="19" y1="12" y2="12"/></svg>
+                                <span>Registrar</span>
+                           </button>
+                        </div>
+                    `;
+                    break;
+                case 'maintenance':
+                    formHTML = `
+                        <h3 class="text-xl font-semibold mb-4 text-white">Registrar Manutenção</h3>
+                        <div class="space-y-4">
+                            <input id="maint-km-input" type="number" placeholder="KM da Manutenção" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" />
+                            <textarea id="maint-service-input" placeholder="Serviço realizado" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" rows="3"></textarea>
+                            <div class="flex items-center space-x-3">
+                                <input type="checkbox" id="maintenance-check" class="h-4 w-4 rounded bg-zinc-800 border-zinc-700 text-green-500 focus:ring-green-500" />
+                                <label for="maintenance-check" class="text-sm text-zinc-300">Marcar veículo como "Em Manutenção" (encerra o turno)</label>
+                            </div>
+                            <button id="register-maint-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg flex items-center justify-center space-x-2 transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                                <span>Registrar</span>
+                            </button>
+                        </div>
+                    `;
+                    break;
+                case 'observation':
+                    formHTML = `
+                        <h3 class="text-xl font-semibold mb-4 text-white">Registrar Observação</h3>
+                        <div class="space-y-4">
+                            <textarea id="obs-note-input" placeholder="Descreva a observação (ex: pneu baixo, luz de alerta, etc.)" class="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-white focus:ring-2 focus:ring-green-500 focus:outline-none" rows="4"></textarea>
+                            <button id="register-obs-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-6 rounded-lg flex items-center justify-center space-x-2 transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                                <span>Salvar Observação</span>
+                            </button>
+                        </div>
+                    `;
+                    break;
+            }
+            container.innerHTML = `
+                <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800">
+                    <div id="guard-form-error" class="hidden bg-red-900/50 text-red-300 text-center p-3 rounded-lg mb-4"></div>
+                    ${formHTML}
+                </div>
+            `;
+        }
+
+        function attachGuardSelectionListeners() {
+            document.getElementById('guard-logout-btn')?.addEventListener('click', handleLogout);
+            document.querySelectorAll('.select-vehicle-btn').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    const vehicleId = e.currentTarget.dataset.vehicleId;
+                    const vehicleRef = doc(db, 'vehicles', vehicleId);
+                    await updateDoc(vehicleRef, { status: 'em_uso', currentGuardId: state.user.id });
+                });
+            });
+        }
+
+        function attachGuardActiveListeners(activeVehicle) {
+            document.getElementById('guard-logout-btn-active')?.addEventListener('click', handleLogout);
+            document.getElementById('return-vehicle-btn').addEventListener('click', async () => {
+                const vehicleRef = doc(db, 'vehicles', activeVehicle.id);
+                await updateDoc(vehicleRef, { status: 'disponivel', currentGuardId: null });
+            });
+
+            document.querySelectorAll('.guard-nav-item').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    state.guardView = e.currentTarget.dataset.view;
+                    renderGuardForm(activeVehicle);
+                    attachGuardActiveListeners(activeVehicle); // Re-attach listeners for the new form
+                });
+            });
+
+            // Attach listeners based on the current form
+            switch (state.guardView) {
+                case 'trip':
+                    document.getElementById('register-trip-btn').addEventListener('click', async () => {
+                        const endKm = document.getElementById('end-km-input').value;
+                        const errorDiv = document.getElementById('guard-form-error');
+                        if (!endKm || parseInt(endKm) <= activeVehicle.currentKm) {
+                            errorDiv.textContent = 'KM final deve ser maior que o KM atual.';
+                            errorDiv.classList.remove('hidden');
+                            return;
+                        }
+                        errorDiv.classList.add('hidden');
+
+                        const newTrip = {
+                            guardId: state.user.id, guardName: state.user.name, vehicleId: activeVehicle.id,
+                            startKm: activeVehicle.currentKm, endKm: parseInt(endKm),
+                            notes: document.getElementById('trip-notes-input').value,
+                            date: new Date().toISOString().split('T')[0]
+                        };
+                        await addDoc(collection(db, 'trips'), newTrip);
+
+                        const vehicleRef = doc(db, 'vehicles', activeVehicle.id);
+                        await updateDoc(vehicleRef, { currentKm: parseInt(endKm) });
+
+                        showToast('Viagem registrada com sucesso!');
+                        // O onSnapshot cuidará de re-renderizar a UI com o KM atualizado
+                    });
+                    break;
+                case 'maintenance':
+                    document.getElementById('register-maint-btn').addEventListener('click', async () => {
+                        const maintKm = document.getElementById('maint-km-input').value;
+                        const maintService = document.getElementById('maint-service-input').value;
+                        const setInMaintenance = document.getElementById('maintenance-check').checked;
+                        const errorDiv = document.getElementById('guard-form-error');
+
+                        if (!maintKm || !maintService) {
+                            errorDiv.textContent = 'Preencha o KM e o serviço da manutenção.';
+                            errorDiv.classList.remove('hidden');
+                            return;
+                        }
+                        errorDiv.classList.add('hidden');
+
+                        await addDoc(collection(db, 'maintenances'), {
+                            vehicleId: activeVehicle.id, km: parseInt(maintKm),
+                            service: maintService, date: new Date().toISOString().split('T')[0]
+                        });
+
+                        if (setInMaintenance) {
+                            const vehicleRef = doc(db, 'vehicles', activeVehicle.id);
+                            await updateDoc(vehicleRef, { status: 'em_manutencao', currentGuardId: null });
+                        }
+                        showToast('Manutenção registrada com sucesso!');
+                    });
+                    break;
+                case 'observation':
+                    document.getElementById('register-obs-btn').addEventListener('click', async () => {
+                        const obsNote = document.getElementById('obs-note-input').value;
+                        const errorDiv = document.getElementById('guard-form-error');
+                        if (!obsNote) {
+                            errorDiv.textContent = 'A observação não pode estar vazia.';
+                            errorDiv.classList.remove('hidden');
+                            return;
+                        }
+                        errorDiv.classList.add('hidden');
+                        await addDoc(collection(db, 'observations'), {
+                            vehicleId: activeVehicle.id, guardId: state.user.id, guardName: state.user.name,
+                            note: obsNote, date: new Date().toISOString().split('T')[0]
+                        });
+                        document.getElementById('obs-note-input').value = '';
+                        showToast('Observação registrada com sucesso!');
+                    });
+                    break;
+            }
+        }
+
+        // --- Gerenciador de Listeners do Firestore ---
+        function setupFirestoreListeners(collectionNames, renderCallback) {
+            collectionNames.forEach(name => {
+                // Se já houver um listener para esta coleção, cancele-o primeiro
+                if (state.listeners[name]) {
+                    state.listeners[name]();
+                }
+
+                const q = query(collection(db, name));
+                state.listeners[name] = onSnapshot(q, (querySnapshot) => {
+                    const items = [];
+                    querySnapshot.forEach((doc) => {
+                        items.push({ id: doc.id, ...doc.data() });
+                    });
+                    state[name] = items;
+                    // Chama a função de renderização principal para a view atual
+                    renderCallback();
+                });
+            });
+        }
+
+        // --- Inicialização ---
+        renderApp();
+
+    </script>
+</body>
+
+</html>
