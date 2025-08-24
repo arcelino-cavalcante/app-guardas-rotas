@@ -1,10 +1,18 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Controle de Frota</title>
+
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#16a34a"/>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Controle de Frota">
+    <link rel="apple-touch-icon" href="https://placehold.co/180x180/16a34a/ffffff?text=Frota">
+    <link rel="manifest" href="manifest.json">
+
     <!-- Tailwind CSS via CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Lucide Icons -->
@@ -14,18 +22,15 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
     <style>
         /* Estilo para garantir que o corpo ocupe toda a altura */
-        html,
-        body {
+        html, body {
             height: 100%;
             margin: 0;
             font-family: 'Inter', sans-serif;
         }
-
         /* Classe para esconder elementos */
         .hidden {
             display: none;
         }
-
         /* Estilo para o corpo do app */
         body {
             background-color: #000;
@@ -33,7 +38,6 @@
         }
     </style>
 </head>
-
 <body>
 
     <!-- Container principal da aplicação -->
@@ -49,9 +53,9 @@
     <script type="module">
         // Importações do Firebase
         import { initializeApp } from "https://www.gstatic.com/firebasejs/9.17.1/firebase-app.js";
-        import {
-            getFirestore, collection, onSnapshot, addDoc, doc,
-            updateDoc, deleteDoc, query, where, getDocs
+        import { 
+            getFirestore, collection, onSnapshot, addDoc, doc, 
+            updateDoc, deleteDoc, query, where, getDocs 
         } from "https://www.gstatic.com/firebasejs/9.17.1/firebase-firestore.js";
 
         // --- Configuração do Firebase ---
@@ -131,7 +135,7 @@
         }
 
         // --- Funções de Renderização ---
-
+        
         // Renderiza o componente principal baseado no estado do usuário
         function renderApp() {
             const savedUser = localStorage.getItem('currentUser');
@@ -232,7 +236,7 @@
             // Unsubscribe from all listeners before logging out
             Object.values(state.listeners).forEach(unsubscribe => unsubscribe());
             state.listeners = {};
-
+            
             localStorage.removeItem('currentUser');
             state.user = null;
             renderApp();
@@ -253,10 +257,10 @@
             const badge = document.getElementById('guard-badge').value;
             const password = document.getElementById('guard-password').value;
             const errorDiv = document.getElementById('login-error');
-
+            
             const q = query(collection(db, "guards"), where("badge", "==", badge), where("password", "==", password));
             const querySnapshot = await getDocs(q);
-
+            
             if (querySnapshot.empty) {
                 errorDiv.textContent = 'Matrícula ou senha inválida.';
                 errorDiv.classList.remove('hidden');
@@ -298,7 +302,7 @@
             attachAdminListeners();
             setupFirestoreListeners(['guards', 'vehicles', 'trips', 'maintenances'], renderAdminContent);
         }
-
+        
         // ... (O restante do código JavaScript continua aqui)
 
         function attachAdminListeners() {
@@ -348,7 +352,7 @@
                     break;
             }
         }
-
+        
         // --- ADMIN: DASHBOARD ---
         function renderAdminDashboard(container) {
             const now = new Date();
@@ -361,9 +365,9 @@
                     return tripDate.getMonth() === currentMonth && tripDate.getFullYear() === currentYear;
                 })
                 .reduce((acc, trip) => acc + (trip.endKm - trip.startKm), 0);
-
+            
             const vehiclesInUse = state.vehicles.filter(v => v.status === 'em_uso').length;
-
+            
             const getStatusInfo = (status) => {
                 switch (status) {
                     case 'disponivel': return { text: 'Disponível', color: 'border-green-500', textColor: 'text-green-400' };
@@ -372,7 +376,7 @@
                     default: return { text: 'Desconhecido', color: 'border-zinc-500', textColor: 'text-zinc-400' };
                 }
             };
-
+            
             container.innerHTML = `
                 <div>
                     <h2 class="text-3xl font-bold text-white mb-6">Dashboard</h2>
@@ -407,9 +411,9 @@
                     <h3 class="text-2xl font-semibold text-white mb-4">Status Detalhado da Frota</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         ${state.vehicles.map(v => {
-                const guard = v.currentGuardId ? state.guards.find(g => g.id === v.currentGuardId) : null;
-                const statusInfo = getStatusInfo(v.status);
-                return `
+                            const guard = v.currentGuardId ? state.guards.find(g => g.id === v.currentGuardId) : null;
+                            const statusInfo = getStatusInfo(v.status);
+                            return `
                                 <div data-vehicle-id="${v.id}" class="vehicle-details-link bg-zinc-900 p-6 rounded-xl border border-zinc-800 border-l-4 ${statusInfo.color} cursor-pointer hover:bg-zinc-800">
                                     <p class="font-bold text-xl text-white">${v.model} (${v.plate})</p>
                                     <p class="font-semibold ${statusInfo.textColor}">
@@ -418,7 +422,7 @@
                                     <p class="text-sm text-zinc-400 mt-2">KM Atual: ${v.currentKm.toLocaleString('pt-BR')} km</p>
                                 </div>
                             `
-            }).join('')}
+                        }).join('')}
                     </div>
                 </div>
             `;
@@ -431,7 +435,7 @@
                 });
             });
         }
-
+        
         // --- ADMIN: GUARDAS ---
         function renderAdminGuards(container) {
             container.innerHTML = `
@@ -534,10 +538,10 @@
                 });
             });
         }
-
+        
         // --- ADMIN: VEÍCULOS ---
         function renderAdminVehicles(container) {
-            container.innerHTML = `
+             container.innerHTML = `
                 <div>
                     <h2 class="text-3xl font-bold text-white mb-6">Gerenciar Frota</h2>
                     <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 mb-8">
@@ -574,7 +578,7 @@
                     </div>
                 </div>
              `;
-            attachAdminVehiclesListeners();
+             attachAdminVehiclesListeners();
         }
 
         function attachAdminVehiclesListeners() {
@@ -586,12 +590,12 @@
                     showToast('Preencha todos os campos.', 'error');
                     return;
                 }
-                const newVehicle = {
-                    model, plate,
-                    initialKm: parseInt(initialKm),
+                const newVehicle = { 
+                    model, plate, 
+                    initialKm: parseInt(initialKm), 
                     currentKm: parseInt(initialKm),
-                    status: 'disponivel',
-                    currentGuardId: null
+                    status: 'disponivel', 
+                    currentGuardId: null 
                 };
                 await addDoc(collection(db, 'vehicles'), newVehicle);
                 document.getElementById('vehicle-model-input').value = '';
@@ -599,7 +603,7 @@
                 document.getElementById('vehicle-km-input').value = '';
                 showToast('Veículo adicionado com sucesso!');
             });
-
+            
             document.querySelectorAll('.delete-vehicle-btn').forEach(btn => {
                 btn.addEventListener('click', async (e) => {
                     const vehicleId = e.currentTarget.dataset.vehicleId;
@@ -609,7 +613,7 @@
                     }
                 });
             });
-
+            
             document.querySelectorAll('.status-select').forEach(select => {
                 select.addEventListener('change', async (e) => {
                     const vehicleId = e.currentTarget.dataset.vehicleId;
@@ -660,7 +664,7 @@
                 });
             });
         }
-
+        
         // --- ADMIN: RELATÓRIOS ---
         function renderAdvancedReports(container) {
             container.innerHTML = `
@@ -727,7 +731,7 @@
                 if (selectedVehicle && maint.vehicleId !== selectedVehicle) return false;
                 return true;
             });
-
+            
             const tripsContainer = document.getElementById('filtered-trips-container');
             const maintenancesContainer = document.getElementById('filtered-maintenances-container');
 
@@ -735,15 +739,15 @@
                 tripsContainer.innerHTML = `
                     <ul class="divide-y divide-zinc-800">
                         ${filteredTrips.map(trip => {
-                    const vehicle = state.vehicles.find(v => v.id === trip.vehicleId);
-                    return `
+                            const vehicle = state.vehicles.find(v => v.id === trip.vehicleId);
+                            return `
                                 <li class="p-4">
                                     <p class="font-semibold text-white">${vehicle?.model} (${vehicle?.plate})</p>
                                     <p class="text-sm text-zinc-400">Guarda: ${trip.guardName} | Data: ${new Date(trip.date).toLocaleDateString('pt-BR')}</p>
                                     <p class="text-sm text-green-400">Distância: ${(trip.endKm - trip.startKm).toLocaleString('pt-BR')} km</p>
                                 </li>
                             `;
-                }).join('')}
+                        }).join('')}
                     </ul>
                 `;
             }
@@ -752,15 +756,15 @@
                 maintenancesContainer.innerHTML = `
                     <ul class="divide-y divide-zinc-800">
                         ${filteredMaintenances.map(maint => {
-                    const vehicle = state.vehicles.find(v => v.id === maint.vehicleId);
-                    return `
+                            const vehicle = state.vehicles.find(v => v.id === maint.vehicleId);
+                            return `
                                 <li class="p-4">
                                     <p class="font-semibold text-white">${vehicle?.model} (${vehicle?.plate})</p>
                                     <p class="text-sm text-zinc-400">Data: ${new Date(maint.date).toLocaleDateString('pt-BR')} | KM: ${maint.km.toLocaleString('pt-BR')}</p>
                                     <p class="text-sm text-yellow-400 mt-1">${maint.service}</p>
                                 </li>
                             `;
-                }).join('')}
+                        }).join('')}
                     </ul>
                 `;
             }
@@ -779,7 +783,7 @@
                 showToast('A biblioteca de PDF ainda está carregando. Tente novamente.', 'error');
                 return;
             }
-
+            
             const startDate = document.getElementById('report-start-date').value;
             const endDate = document.getElementById('report-end-date').value;
             const selectedVehicle = document.getElementById('report-vehicle-select').value;
@@ -846,7 +850,7 @@
                     }
                 });
             }
-
+            
             doc.save('relatorio_frota.pdf');
         }
 
@@ -925,15 +929,15 @@
                     <div class="bg-zinc-900 p-6 rounded-xl border border-zinc-800 max-h-[30rem] overflow-y-auto">
                         <ul class="divide-y divide-zinc-800">
                             ${guardTrips.map(trip => {
-                const vehicle = state.vehicles.find(v => v.id === trip.vehicleId);
-                return `
+                                const vehicle = state.vehicles.find(v => v.id === trip.vehicleId);
+                                return `
                                     <li class="p-4">
                                         <p class="font-semibold text-white">${vehicle?.model} (${vehicle?.plate})</p>
                                         <p class="text-sm text-zinc-400">Data: ${new Date(trip.date).toLocaleDateString('pt-BR')}</p>
                                         <p class="text-sm text-green-400">Distância: ${(trip.endKm - trip.startKm).toLocaleString('pt-BR')} km</p>
                                     </li>
                                 `;
-            }).join('')}
+                            }).join('')}
                         </ul>
                     </div>
                 </div>
@@ -943,7 +947,7 @@
                 renderAdminContent();
             });
         }
-
+        
         // --- GUARD APP ---
         function renderGuardApp() {
             setupFirestoreListeners(['vehicles'], renderGuardContent);
@@ -1128,15 +1132,15 @@
                             return;
                         }
                         errorDiv.classList.add('hidden');
-
+                        
                         const newTrip = {
                             guardId: state.user.id, guardName: state.user.name, vehicleId: activeVehicle.id,
                             startKm: activeVehicle.currentKm, endKm: parseInt(endKm),
-                            notes: document.getElementById('trip-notes-input').value,
+                            notes: document.getElementById('trip-notes-input').value, 
                             date: new Date().toISOString().split('T')[0]
                         };
                         await addDoc(collection(db, 'trips'), newTrip);
-
+                        
                         const vehicleRef = doc(db, 'vehicles', activeVehicle.id);
                         await updateDoc(vehicleRef, { currentKm: parseInt(endKm) });
 
@@ -1159,10 +1163,10 @@
                         errorDiv.classList.add('hidden');
 
                         await addDoc(collection(db, 'maintenances'), {
-                            vehicleId: activeVehicle.id, km: parseInt(maintKm),
+                            vehicleId: activeVehicle.id, km: parseInt(maintKm), 
                             service: maintService, date: new Date().toISOString().split('T')[0]
                         });
-
+                        
                         if (setInMaintenance) {
                             const vehicleRef = doc(db, 'vehicles', activeVehicle.id);
                             await updateDoc(vehicleRef, { status: 'em_manutencao', currentGuardId: null });
@@ -1181,7 +1185,7 @@
                         }
                         errorDiv.classList.add('hidden');
                         await addDoc(collection(db, 'observations'), {
-                            vehicleId: activeVehicle.id, guardId: state.user.id, guardName: state.user.name,
+                            vehicleId: activeVehicle.id, guardId: state.user.id, guardName: state.user.name, 
                             note: obsNote, date: new Date().toISOString().split('T')[0]
                         });
                         document.getElementById('obs-note-input').value = '';
@@ -1190,7 +1194,7 @@
                     break;
             }
         }
-
+        
         // --- Gerenciador de Listeners do Firestore ---
         function setupFirestoreListeners(collectionNames, renderCallback) {
             collectionNames.forEach(name => {
@@ -1216,6 +1220,82 @@
         renderApp();
 
     </script>
-</body>
+    
+    <!-- PWA Registration Script -->
+    <script>
+        // In-line Manifest
+        const manifest = {
+          "name": "Controle de Frota",
+          "short_name": "Frota",
+          "description": "Aplicativo para gerenciamento de frota de veículos.",
+          "start_url": ".",
+          "display": "standalone",
+          "background_color": "#000000",
+          "theme_color": "#16a34a",
+          "icons": [
+            {
+              "src": "https://placehold.co/192x192/16a34a/ffffff?text=Frota",
+              "sizes": "192x192",
+              "type": "image/png",
+              "purpose": "any maskable"
+            },
+            {
+              "src": "https://placehold.co/512x512/16a34a/ffffff?text=Frota",
+              "sizes": "512x512",
+              "type": "image/png",
+              "purpose": "any maskable"
+            }
+          ]
+        };
+        const manifestBlob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
+        const manifestURL = URL.createObjectURL(manifestBlob);
+        document.querySelector('link[rel="manifest"]').setAttribute('href', manifestURL);
 
+
+        // Service Worker Registration
+        if ('serviceWorker' in navigator) {
+            const swContent = `
+                const CACHE_NAME = 'frota-cache-v1';
+                // A lista de URLs para cache é apenas a página principal, pois é um app de arquivo único.
+                const urlsToCache = ['.']; 
+
+                self.addEventListener('install', event => {
+                  event.waitUntil(
+                    caches.open(CACHE_NAME)
+                      .then(cache => {
+                        console.log('Cache aberto');
+                        return cache.addAll(urlsToCache);
+                      })
+                  );
+                });
+
+                self.addEventListener('fetch', event => {
+                  event.respondWith(
+                    caches.match(event.request)
+                      .then(response => {
+                        // Se encontrar no cache, retorna a resposta do cache.
+                        if (response) {
+                          return response;
+                        }
+                        // Senão, busca na rede.
+                        return fetch(event.request);
+                      })
+                  );
+                });
+            `;
+            const swBlob = new Blob([swContent], {type: 'application/javascript'});
+            const swURL = URL.createObjectURL(swBlob);
+
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register(swURL)
+                    .then(registration => {
+                        console.log('Service Worker registrado com sucesso:', registration);
+                    })
+                    .catch(error => {
+                        console.log('Falha ao registrar o Service Worker:', error);
+                    });
+            });
+        }
+    </script>
+</body>
 </html>
